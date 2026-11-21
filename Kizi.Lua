@@ -1257,7 +1257,19 @@ InfoTab:CreateButton({
         Notify("تم التصفير", "تم إعادة تعيين إحصائيات الجلسة.", 2)
     end
 })
-
+InfoTab:CreateButton({
+    name = "🔄 تحديث وإعادة تشغيل السكربت الآن",
+    description = "يحمل آخر تعديل من GitHub فوراً بدون الخروج من اللعبة.",
+    callback = function()
+        Notify("جاري التحديث...", "سيتم إغلاق هذه النسخة وتحميل آخر تحديث من GitHub.", 2)
+        task.wait(0.3)
+        if type(getgenv) == "function" and type(getgenv().KiziHubCleanup) == "function" then
+            pcall(getgenv().KiziHubCleanup)
+        end
+        local url = "https://raw.githubusercontent.com/KiziTheBusy/9yd/main/Kizi.Lua?v=" .. tostring(math.floor(tick()))
+        loadstring(game:HttpGet(url))()
+    end
+})
 InfoTab:CreateSection({ name = "🔔 إشعارات ديسكورد (Discord Webhook)" })
 
 InfoTab:CreateInput({
