@@ -1,12 +1,11 @@
 --[[
-    kizithebusy HUB — Pro Showcase Edition (Rayfield Gen2 | PC & Mobile)
-    - Tier-based Dhab vs Monster Classification (T1-T6 prioritized)
-    - Ranged Auto-Shoot with Line-of-Sight Check + Smart Mouse/Tool FireWeapon
-    - Camera-Priority Aimbot + Auto-Fire on Lock + Dynamic FOV Circle
-    - Smart Anti-Stuck (Raycast + Lateral Strafe) & 15s Unreachable Target Blacklist
-    - Auto-Evade Monsters (Retreats to safe distance & resumes)
-    - Pro Visuals: Glowing Highlight Chams, 2D Rare Tracers, Live Dashboard HUD
-    - Saved Tent Eat/Drink Loop & Deep Circle Patrol with 3D Rings
+    kizithebusy HUB — Pro Showcase Edition V7 (Rayfield Gen2 | PC & Mobile)
+    - Dedicated Abu Mashlah Kite Farm (Orbit at Custom Distance by Car/Foot + Auto-Equip & Shoot)
+    - Aimbot Option: Abu Mashlah Only Mode (Works Inside Car)
+    - Car Waypoint Navigation System (Save/Name/Delete Locations + Fly by Car 20-200)
+    - Car Hover Patrol Mode (0-200 Speed) + 6000 Max Radius & ESP + Stay Seated on Stop
+    - Driver-Seat-Only Protection + Monster Screen Warning Watcher -> Discord Webhook
+    - Smart Tent Routine + Ranged Auto-Shoot with Line-of-Sight + Dynamic FOV
 ]]
 
 local Rayfield = loadstring(game:HttpGet("https://sirius.menu/gen2"))()
@@ -27,16 +26,16 @@ local Camera = Workspace.CurrentCamera
 ---------------------------------------------------------
 local CONFIG = {
     HubName = "kizithebusy HUB",
-    Subtitle = "Pro Showcase Edition • Safe Gen2",
+    Subtitle = "Pro Showcase Edition V7 • Safe Gen2",
     DiscordLink = "https://discord.gg/JEewdnUyK8",
     LogoID = "rbxassetid://96007556931310"
 }
 
-local SaveFileName = "kizithebusy_Hub_V4_Settings.json"
+local SaveFileName = "kizithebusy_Hub_V7_Settings.json"
 local Settings = {
     -- Auto-Farm
     AutoFarmActive = false,
-    FarmMode = "WalkJump", -- "WalkJump" or "GentleGlide"
+    FarmMode = "WalkJump",
     FarmRange = 450,
     FarmT1 = false,
     FarmT2 = false,
@@ -52,12 +51,21 @@ local Settings = {
     AutoEvadeMonster = true,
     EvadeTriggerDist = 60,
 
+    -- Dedicated Abu Mashlah Kite Farm (Patrol Tab)
+    AutoFarmMashlah = false,
+    MashlahKeepDist = 75,
+    MashlahAutoShoot = true,
+
     -- Tent / Ezba Return Loop
     AutoTentActive = false,
     TentIntervalMinutes = 5,
     TentPosX = nil,
     TentPosY = nil,
     TentPosZ = nil,
+
+    -- Car Waypoints System
+    Waypoints = {},
+    WaypointCarSpeed = 160,
 
     -- ESP & Pro Visuals
     DhabAll = false,
@@ -69,28 +77,35 @@ local Settings = {
     Vehicles = false,
     ShopEzba = false,
     Edge = false,
-    EspDistance = 600,
+    EspDistance = 1200,
 
     -- Smooth Safe Aimbot + Error Margin
     Aimbot = false,
     AimbotRareOnly = false,
+    AimbotMashlahOnly = false,
     AimbotSmoothness = 0.45,
-    AimbotDistance = 120,
+    AimbotDistance = 150,
     RequireWeapon = false,
     UseFOVCircle = true,
     FOVRadius = 130,
     HoldRightClick = false,
     UseErrorMargin = true,
-    AimAccuracy = 95, -- 70% to 99%
+    AimAccuracy = 95,
 
-    -- Deep Circle Patrol & Auto-Stop
+    -- Deep Circle Patrol, Car Flight & Auto-Stop
     PatrolActive = false,
-    PatrolRadius = 400,
+    CarPatrolFly = false,
+    CarPatrolSpeed = 140,
+    PatrolRadius = 1000,
     ShowPatrolRings = true,
     StopOnT6 = true,
     StopOnT5 = false,
     StopOnMonster = true,
     StopOnDamage = true,
+
+    -- Discord Webhook
+    DiscordWebhook = "",
+    DiscordAlertsActive = false,
 
     -- HUD & Safe Utils
     RareHudActive = true,
@@ -98,7 +113,7 @@ local Settings = {
     HudPosY = 0.14,
     AntiAfkActive = true,
     VehicleBoostActive = false,
-    VehicleMaxSpeed = 95
+    VehicleMaxSpeed = 200
 }
 
 if writefile and readfile and isfile and isfile(SaveFileName) then
@@ -114,12 +129,48 @@ if writefile and readfile and isfile and isfile(SaveFileName) then
     end
 end
 
+if type(Settings.Waypoints) ~= "table" then
+    Settings.Waypoints = {}
+end
+
 local function SaveSettings()
     if writefile then
         pcall(function()
             writefile(SaveFileName, HttpService:JSONEncode(Settings))
         end)
     end
+end
+
+---------------------------------------------------------
+-- Discord Webhook Sender
+---------------------------------------------------------
+local HttpRequestFunc = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+
+local function SendDiscordWebhook(Title, Description, ColorInt)
+    if not Settings.DiscordAlertsActive or not Settings.DiscordWebhook or Settings.DiscordWebhook == "" then
+        return
+    end
+    if type(HttpRequestFunc) ~= "function" then return end
+
+    task.spawn(function()
+        pcall(function()
+            local Payload = {
+                username = "kizithebusy HUB • رادار الصيد",
+                embeds = {{
+                    title = Title,
+                    description = Description,
+                    color = ColorInt or 9133302,
+                    footer = { text = "اللاعب: " .. LP.Name .. " • " .. os.date("%H:%M:%S") }
+                }}
+            }
+            HttpRequestFunc({
+                Url = Settings.DiscordWebhook,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = HttpService:JSONEncode(Payload)
+            })
+        end)
+    end)
 end
 
 ---------------------------------------------------------
@@ -178,6 +229,9 @@ local SessionStats = {
     TotalCaught = 0
 }
 local BotStatusText = "جاهز (Idle)"
+local IsTravelingToWaypoint = false
+local ActiveMashlahTarget = nil
+local MashlahOrbitAngle = 0
 
 local function FormatTime(seconds)
     local h = math.floor(seconds / 3600)
@@ -381,6 +435,18 @@ local function IsDhabAlive(Model)
     return true
 end
 
+local function IsMonsterAlive(Model)
+    if not Model or not Model.Parent then return false end
+    local Hum = Model:FindFirstChildOfClass("Humanoid")
+    if Hum and Hum.Health <= 0 then return false end
+    for Key, Value in pairs(Model:GetAttributes()) do
+        local kLow = tostring(Key):lower()
+        if (kLow == "dead" or kLow == "isdead") and Value == true then return false end
+        if (kLow == "health" or kLow == "hp") and tonumber(Value) and tonumber(Value) <= 0 then return false end
+    end
+    return true
+end
+
 local function GetDhabInfo(Model)
     local TierFound, StateFound = nil, nil
     for Key, Value in pairs(Model:GetAttributes()) do
@@ -408,6 +474,12 @@ local function GetDhabInfo(Model)
     end
 
     return LastKnownStates[Model], Rarity, TierFound, Alive
+end
+
+local function IsMashlahModel(Model)
+    if not Model then return false end
+    local NameLower = Model.Name:lower()
+    return NameLower:find("mashlah") ~= nil or NameLower:find("مشلح") ~= nil
 end
 
 local function IsMonsterModel(Model)
@@ -488,7 +560,7 @@ local function DrawPatrolRings()
 
     local Scales = {1.0, 0.60, 0.30}
     local RingColors = {DarkTheme.Accent, Color3.fromRGB(56, 189, 248), Color3.fromRGB(255, 180, 50)}
-    local Segments = 36
+    local Segments = 24
 
     for idx, scale in ipairs(Scales) do
         local r = Settings.PatrolRadius * scale
@@ -535,10 +607,64 @@ local function Notify(titleText, contentText, dur)
 end
 
 ---------------------------------------------------------
--- Helper Functions, Smart Anti-Stuck, Safe Movement & FireWeapon
+-- Monster Warning Text & Screen Alert Watcher (Webhook)
+---------------------------------------------------------
+local WarningKeywords = {
+    "الأرض تهتز", "الارض تهتز", "تهتز",
+    "أبو مشلح", "ابو مشلح", "مشلح",
+    "فانوس", "ملبوس", "غرز",
+    "ظلام", "خطر", "اقترب"
+}
+local LastWarningWebhookTime = 0
+
+local function CheckMonsterWarningText(RawText)
+    if type(RawText) ~= "string" or #RawText < 3 or #RawText > 180 then return end
+    if (tick() - LastWarningWebhookTime) < 12 then return end
+
+    for _, kw in ipairs(WarningKeywords) do
+        if RawText:find(kw, 1, true) then
+            LastWarningWebhookTime = tick()
+            if Settings.SmartAlerts then
+                pcall(function() NotifySound:Play() end)
+                Notify("⚠️ تحذير ظهور وحش!", RawText, 5)
+            end
+            SendDiscordWebhook(
+                "⚠️ تحذير: اقتراب وحش في السيرفر!",
+                "ظهرت رسالة تحذير في اللعبة:\n> **" .. RawText .. "**",
+                15548997
+            )
+            break
+        end
+    end
+end
+
+task.spawn(function()
+    local PGui = LP:WaitForChild("PlayerGui", 10)
+    if not PGui then return end
+
+    local function HookTextObject(Obj)
+        if not Obj:IsA("TextLabel") then return end
+        if Obj:IsDescendantOf(overlayGui) or Obj.Name:find("Rayfield") then return end
+
+        CheckMonsterWarningText(Obj.Text)
+        Obj:GetPropertyChangedSignal("Text"):Connect(function()
+            if Obj.Visible then
+                CheckMonsterWarningText(Obj.Text)
+            end
+        end)
+    end
+
+    for _, desc in ipairs(PGui:GetDescendants()) do
+        HookTextObject(desc)
+    end
+    PGui.DescendantAdded:Connect(HookTextObject)
+end)
+
+---------------------------------------------------------
+-- Car Hover Flight, Smart Anti-Stuck, Movement & FireWeapon
 ---------------------------------------------------------
 local function GetPart(Model)
-    return Model:FindFirstChild("HumanoidRootPart") or Model:FindFirstChild("Head") or Model.PrimaryPart or Model:FindFirstChildWhichIsA("BasePart")
+    return Model:FindFirstChild("Head") or Model:FindFirstChild("HumanoidRootPart") or Model.PrimaryPart or Model:FindFirstChildWhichIsA("BasePart")
 end
 
 local WalkRayParams = RaycastParams.new()
@@ -556,10 +682,77 @@ local function ShouldJumpObstacle(MyChar, MyRoot)
 end
 
 local GlideBodyVel = nil
+local CarBodyVel = nil
+local CarBodyGyro = nil
+
+local function ClearCarFlight()
+    if CarBodyVel then
+        pcall(function() CarBodyVel:Destroy() end)
+        CarBodyVel = nil
+    end
+    if CarBodyGyro then
+        pcall(function() CarBodyGyro:Destroy() end)
+        CarBodyGyro = nil
+    end
+end
+
 local function ClearGlide()
     if GlideBodyVel then
-        GlideBodyVel:Destroy()
+        pcall(function() GlideBodyVel:Destroy() end)
         GlideBodyVel = nil
+    end
+    ClearCarFlight()
+end
+
+local function GetCurrentVehicleSeat(Hum)
+    if Hum and Hum.SeatPart and Hum.SeatPart:IsA("VehicleSeat") then
+        return Hum.SeatPart
+    end
+    return nil
+end
+
+local function StopCarMomentum(Seat)
+    ClearCarFlight()
+    if not Seat then return end
+    local CarModel = Seat:FindFirstAncestorOfClass("Model")
+    local MainPart = (CarModel and CarModel.PrimaryPart) or Seat
+    pcall(function()
+        MainPart.AssemblyLinearVelocity = Vector3.zero
+        MainPart.AssemblyAngularVelocity = Vector3.zero
+    end)
+end
+
+local function MoveCarTowardsTarget(Seat, TargetPos, Speed)
+    local CarModel = Seat:FindFirstAncestorOfClass("Model")
+    local MainPart = (CarModel and CarModel.PrimaryPart) or Seat
+
+    if not CarBodyVel or CarBodyVel.Parent ~= MainPart then
+        ClearCarFlight()
+        CarBodyVel = Instance.new("BodyVelocity")
+        CarBodyVel.MaxForce = Vector3.new(9e6, 9e6, 9e6)
+        CarBodyVel.Parent = MainPart
+
+        CarBodyGyro = Instance.new("BodyGyro")
+        CarBodyGyro.MaxTorque = Vector3.new(9e6, 9e6, 9e6)
+        CarBodyGyro.P = 12000
+        CarBodyGyro.Parent = MainPart
+    end
+
+    if Speed <= 0 then
+        CarBodyVel.Velocity = Vector3.zero
+        return
+    end
+
+    local HoverGoal = Vector3.new(TargetPos.X, TargetPos.Y + 4.5, TargetPos.Z)
+    local Diff = HoverGoal - MainPart.Position
+    if Diff.Magnitude > 1 then
+        CarBodyVel.Velocity = Diff.Unit * Speed
+        local FlatLook = Vector3.new(TargetPos.X, MainPart.Position.Y, TargetPos.Z)
+        if (FlatLook - MainPart.Position).Magnitude > 0.5 then
+            CarBodyGyro.CFrame = CFrame.new(MainPart.Position, FlatLook)
+        end
+    else
+        CarBodyVel.Velocity = Vector3.zero
     end
 end
 
@@ -576,14 +769,14 @@ local function CheckAndResolveStuck(MyChar, MyRoot, Hum, UseGlide)
         return false
     end
 
-    if (now - LastStuckCheckTime) >= 2.5 then
+    if (now - LastStuckCheckTime) >= 2.0 then
         local movedDist = (Vector3.new(MyRoot.Position.X, 0, MyRoot.Position.Z) - Vector3.new(LastStuckCheckPos.X, 0, LastStuckCheckPos.Z)).Magnitude
         LastStuckCheckPos = MyRoot.Position
         LastStuckCheckTime = now
 
-        if movedDist < 2.5 then
+        if movedDist < 2.2 then
             StrafeSign = -StrafeSign
-            local SideOffset = MyRoot.CFrame.RightVector * (12 * StrafeSign) - MyRoot.CFrame.LookVector * 4
+            local SideOffset = MyRoot.CFrame.RightVector * (10 * StrafeSign) - MyRoot.CFrame.LookVector * 3
             local EscapePos = MyRoot.Position + SideOffset
             Hum.Jump = true
             if UseGlide and GlideBodyVel then
@@ -591,7 +784,7 @@ local function CheckAndResolveStuck(MyChar, MyRoot, Hum, UseGlide)
             else
                 Hum:MoveTo(EscapePos)
             end
-            task.wait(0.35)
+            task.wait(0.3)
             Hum.Jump = true
             return true
         end
@@ -674,7 +867,110 @@ local function FireWeapon(MyChar, Hum)
 end
 
 ---------------------------------------------------------
--- Saved Tent Eat & Drink Routine
+-- Car Waypoint Navigation Helpers
+---------------------------------------------------------
+local WaypointInputName = ""
+local SelectedWaypointName = nil
+local WaypointDropdown = nil
+
+local function GetWaypointNames()
+    local names = {}
+    for _, wp in ipairs(Settings.Waypoints) do
+        if wp and type(wp.name) == "string" and wp.name ~= "" then
+            table.insert(names, wp.name)
+        end
+    end
+    if #names == 0 then
+        table.insert(names, "لا توجد مواقع محفوظة")
+    end
+    return names
+end
+
+local function FindWaypointByName(wpName)
+    if not wpName or wpName == "" then return nil, nil end
+    for idx, wp in ipairs(Settings.Waypoints) do
+        if wp.name == wpName then
+            return wp, idx
+        end
+    end
+    return nil, nil
+end
+
+local function RefreshWaypointDropdown()
+    local names = GetWaypointNames()
+    if WaypointDropdown then
+        pcall(function()
+            if type(WaypointDropdown.SetOptions) == "function" then
+                WaypointDropdown:SetOptions(names)
+            elseif type(WaypointDropdown.Refresh) == "function" then
+                WaypointDropdown:Refresh(names, true)
+            elseif type(WaypointDropdown.Set) == "function" then
+                WaypointDropdown:Set(names)
+            end
+        end)
+    end
+end
+
+local function StartCarTripToWaypoint(TargetName)
+    local wp = FindWaypointByName(TargetName)
+    if not wp then
+        Notify("تنبيه التنقل", "اختر موقعاً محفوظاً من القائمة أو اكتب اسمه أولاً!", 3)
+        return
+    end
+
+    local MyChar = LP.Character
+    local Hum = MyChar and MyChar:FindFirstChildOfClass("Humanoid")
+    local Seat = GetCurrentVehicleSeat(Hum)
+    if not Seat then
+        Notify("اركب السيارة أولاً", "يجب أن تكون جالساً في مقعد السائق للانتقال بالسيارة!", 3)
+        return
+    end
+
+    IsTravelingToWaypoint = true
+    local GoalPos = Vector3.new(wp.x, wp.y, wp.z)
+    BotStatusText = "متجه بالسيارة إلى: " .. wp.name .. " 🚗"
+    Notify("🚗 انطلاق الرحلة", "جاري الانتقال بالسيارة إلى (" .. wp.name .. ")...", 3)
+
+    task.spawn(function()
+        local TripStart = tick()
+        while overlayGui.Parent and IsTravelingToWaypoint and (tick() - TripStart) < 120 do
+            local CharNow = LP.Character
+            local RootNow = CharNow and CharNow:FindFirstChild("HumanoidRootPart")
+            local HumNow = CharNow and CharNow:FindFirstChildOfClass("Humanoid")
+            local SeatNow = GetCurrentVehicleSeat(HumNow)
+
+            if not RootNow or not SeatNow then
+                Notify("تم إلغاء الرحلة", "نزلت من مقعد السائق أثناء التنقل.", 3)
+                break
+            end
+
+            local FlatDist = (Vector3.new(GoalPos.X, RootNow.Position.Y, GoalPos.Z) - RootNow.Position).Magnitude
+            BotStatusText = string.format("إلى %s • %dm 🚗", wp.name, math.floor(FlatDist))
+
+            if FlatDist <= 14 then
+                StopCarMomentum(SeatNow)
+                Notify("✅ تم الوصول!", "وصلت بالسيارة إلى موقع (" .. wp.name .. ") بنجاح.", 3)
+                break
+            end
+
+            local ActiveSpeed = Settings.WaypointCarSpeed
+            if FlatDist < 45 then
+                ActiveSpeed = math.max(35, ActiveSpeed * 0.45)
+            end
+
+            MoveCarTowardsTarget(SeatNow, GoalPos, ActiveSpeed)
+            task.wait(0.08)
+        end
+
+        local HumEnd = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+        StopCarMomentum(GetCurrentVehicleSeat(HumEnd))
+        IsTravelingToWaypoint = false
+        BotStatusText = "جاهز (Idle)"
+    end)
+end
+
+---------------------------------------------------------
+-- Saved Tent Eat & Drink Routine (Driver Seat Only + Exact Snap)
 ---------------------------------------------------------
 local IsEatingAtTent = false
 local LastTentTimestamp = tick()
@@ -694,7 +990,7 @@ local function TriggerNearbyFoodWaterPrompts(Radius)
                     if ActionLow:find("تمر") or ActionLow:find("ماء") or ActionLow:find("موية") or ActionLow:find("اشرب") or ActionLow:find("أكل") or ActionLow:find("اكل") or ActionLow:find("eat") or ActionLow:find("drink") or ActionLow:find("date") or ActionLow:find("water") or ActionLow:find("coffee") or ActionLow:find("قهوة") or ActionLow:find("furn_") then
                         if type(fireproximityprompt) == "function" then
                             pcall(function() fireproximityprompt(Obj) end)
-                            task.wait(0.6)
+                            task.wait(0.55)
                         end
                     end
                 end
@@ -713,52 +1009,145 @@ local function ExecuteTentEatRoutine()
 
     IsEatingAtTent = true
     BotStatusText = "الرجوع للخيمة (أكل وشرب) ⛺"
-    Notify("⛺ وقت الأكل والشرب", "جاري الرجوع إلى موقع الخيمة المحفوظ...", 3)
+    Notify("⛺ وقت الأكل والشرب", "جاري التوجه إلى موقع الخيمة المحفوظ...", 3)
+
+    local MyChar = LP.Character
+    local Hum = MyChar and MyChar:FindFirstChildOfClass("Humanoid")
+    local SavedSeat = GetCurrentVehicleSeat(Hum)
 
     local StartWalk = tick()
     while overlayGui.Parent and (tick() - StartWalk) < 45 do
-        local MyChar = LP.Character
+        MyChar = LP.Character
         local MyRoot = MyChar and MyChar:FindFirstChild("HumanoidRootPart")
-        local Hum = MyChar and MyChar:FindFirstChildOfClass("Humanoid")
+        Hum = MyChar and MyChar:FindFirstChildOfClass("Humanoid")
         if not MyRoot or not Hum then break end
 
-        local Dist = (Vector3.new(SavedTentPosition.X, MyRoot.Position.Y, SavedTentPosition.Z) - MyRoot.Position).Magnitude
-        if Dist <= 8 then
-            ClearGlide()
-            Hum:MoveTo(MyRoot.Position)
-            break
-        end
+        local SeatNow = GetCurrentVehicleSeat(Hum)
+        local FlatDist = (Vector3.new(SavedTentPosition.X, MyRoot.Position.Y, SavedTentPosition.Z) - MyRoot.Position).Magnitude
 
-        MoveTowardsTarget(MyChar, MyRoot, Hum, SavedTentPosition, (Settings.FarmMode == "GentleGlide"))
-        task.wait(0.15)
+        if SeatNow then
+            SavedSeat = SeatNow
+            if FlatDist <= 14 then
+                StopCarMomentum(SeatNow)
+                task.wait(0.25)
+                Hum.Jump = true
+                task.wait(0.45)
+                break
+            else
+                local TravelSpeed = math.max(Settings.CarPatrolSpeed, 90)
+                MoveCarTowardsTarget(SeatNow, SavedTentPosition, TravelSpeed)
+            end
+        else
+            if FlatDist <= 3.5 then
+                ClearGlide()
+                Hum:MoveTo(MyRoot.Position)
+                break
+            end
+            MoveTowardsTarget(MyChar, MyRoot, Hum, SavedTentPosition, (Settings.FarmMode == "GentleGlide"))
+        end
+        task.wait(0.12)
     end
 
     ClearGlide()
-    task.wait(0.4)
+
+    MyChar = LP.Character
+    local MyRoot = MyChar and MyChar:FindFirstChild("HumanoidRootPart")
+    Hum = MyChar and MyChar:FindFirstChildOfClass("Humanoid")
+    if MyRoot and Hum then
+        local SnapStart = tick()
+        while (tick() - SnapStart) < 5 do
+            local ExactDist = (Vector3.new(SavedTentPosition.X, MyRoot.Position.Y, SavedTentPosition.Z) - MyRoot.Position).Magnitude
+            if ExactDist <= 2.5 then
+                Hum:MoveTo(MyRoot.Position)
+                break
+            end
+            Hum:MoveTo(SavedTentPosition)
+            if ExactDist <= 9 then
+                MyRoot.CFrame = CFrame.new(SavedTentPosition.X, MyRoot.Position.Y, SavedTentPosition.Z)
+                break
+            end
+            task.wait(0.2)
+        end
+    end
 
     for _ = 1, 3 do
-        TriggerNearbyFoodWaterPrompts(15)
-        task.wait(0.6)
+        if MyRoot and Hum then
+            local Drift = (Vector3.new(SavedTentPosition.X, MyRoot.Position.Y, SavedTentPosition.Z) - MyRoot.Position).Magnitude
+            if Drift > 3 then
+                MyRoot.CFrame = CFrame.new(SavedTentPosition.X, MyRoot.Position.Y, SavedTentPosition.Z)
+            end
+        end
+        TriggerNearbyFoodWaterPrompts(16)
+        task.wait(0.55)
+    end
+
+    if SavedSeat and SavedSeat.Parent and SavedSeat:IsA("VehicleSeat") and MyChar and Hum then
+        BotStatusText = "الرجوع لمقعد السائق 🚗"
+        local CarModel = SavedSeat:FindFirstAncestorOfClass("Model")
+        local DisabledPassengerSeats = {}
+
+        if CarModel then
+            for _, obj in ipairs(CarModel:GetDescendants()) do
+                if obj:IsA("Seat") and not obj:IsA("VehicleSeat") and obj.CanTouch then
+                    obj.CanTouch = false
+                    table.insert(DisabledPassengerSeats, obj)
+                end
+            end
+        end
+
+        local ReturnStart = tick()
+        while overlayGui.Parent and (tick() - ReturnStart) < 15 do
+            MyRoot = MyChar:FindFirstChild("HumanoidRootPart")
+            if not MyRoot then break end
+
+            if Hum.SeatPart and Hum.SeatPart ~= SavedSeat then
+                Hum.Jump = true
+                task.wait(0.2)
+            elseif Hum.SeatPart == SavedSeat then
+                break
+            end
+
+            local SeatDist = (SavedSeat.Position - MyRoot.Position).Magnitude
+            if SeatDist <= 14 then
+                ClearGlide()
+                MyRoot.CFrame = SavedSeat.CFrame + Vector3.new(0, 1.5, 0)
+                task.wait(0.1)
+                pcall(function() SavedSeat:Sit(Hum) end)
+                task.wait(0.3)
+                if Hum.SeatPart == SavedSeat then break end
+            end
+
+            MoveTowardsTarget(MyChar, MyRoot, Hum, SavedSeat.Position, false)
+            task.wait(0.15)
+        end
+
+        for _, pSeat in ipairs(DisabledPassengerSeats) do
+            if pSeat and pSeat.Parent then
+                pSeat.CanTouch = true
+            end
+        end
+        ClearGlide()
     end
 
     LastTentTimestamp = tick()
     IsEatingAtTent = false
     BotStatusText = "جاهز (Idle)"
-    Notify("✅ تم الأكل والشرب", "تمت تعبئة الجوع والعطش من الخيمة، جاري العودة للفارم!", 3)
+    Notify("✅ تم الأكل والشرب", "تمت تعبئة الجوع والعطش من الخيمة والعودة لمقعد السائق!", 3)
 end
 
 ---------------------------------------------------------
 -- Tabs & Official Gen2 Controls
 ---------------------------------------------------------
 local InfoTab = window:CreateTab({ name = "المعلومات", icon = 93364949241311 })
+local WaypointsTab = window:CreateTab({ name = "التنقل بالسيارة", icon = 93364949241311 })
 local FarmTab = window:CreateTab({ name = "اوتو فارم", icon = 93364949241311 })
 local PatrolTab = window:CreateTab({ name = "الدوران التلقائي", icon = 93364949241311 })
 local EspTab = window:CreateTab({ name = "قائمة ESP", icon = 93364949241311 })
 local AimTab = window:CreateTab({ name = "الايمبوت", icon = 93364949241311 })
 local UtilsTab = window:CreateTab({ name = "أدوات آمنة", icon = 93364949241311 })
 
--- Tab 1: Info
-InfoTab:CreateSection({ name = "💎 مرحباً بك في kizithebusy HUB (Pro)" })
+-- Tab 1: Info & Discord Webhook
+InfoTab:CreateSection({ name = "💎 مرحباً بك في kizithebusy HUB (V7)" })
 
 InfoTab:CreateButton({
     name = "💬 نسخ رابط مجتمع Discord",
@@ -784,7 +1173,165 @@ InfoTab:CreateButton({
     end
 })
 
--- Tab 2: Smart Auto-Farm
+InfoTab:CreateSection({ name = "🔔 إشعارات ديسكورد (Discord Webhook)" })
+
+InfoTab:CreateInput({
+    name = "رابط Discord Webhook",
+    placeholder = "https://discord.com/api/webhooks/...",
+    value = Settings.DiscordWebhook,
+    callback = function(text)
+        Settings.DiscordWebhook = text
+        SaveSettings()
+    end
+})
+
+InfoTab:CreateToggle({
+    name = "📨 تفعيل إرسال الإشعارات إلى ديسكورد",
+    description = "يرسل إشعاراً عند رصد نادر أو ظهور تحذير وحش (الأرض تهتز / أبو مشلح).",
+    value = Settings.DiscordAlertsActive,
+    callback = function(value)
+        Settings.DiscordAlertsActive = value
+        SaveSettings()
+    end
+})
+
+InfoTab:CreateButton({
+    name = "🧪 إرسال إشعار تجريبي لديسكورد",
+    description = "يختبر صحة رابط الويب هوك ويرسل رسالة تجريبية.",
+    callback = function()
+        if Settings.DiscordWebhook == "" then
+            Notify("تنبيه", "الصق رابط الـ Webhook في الخانة أعلاه أولاً!", 3)
+            return
+        end
+        local PrevState = Settings.DiscordAlertsActive
+        Settings.DiscordAlertsActive = true
+        SendDiscordWebhook("✅ اتصال ناجح!", "تم ربط **kizithebusy HUB V7** بسيرفر الديسكورد بنجاح.", 3447003)
+        Settings.DiscordAlertsActive = PrevState
+        Notify("تم الإرسال", "تحقق من قناة الديسكورد الآن!", 3)
+    end
+})
+
+-- Tab 2: Car Waypoints & Fast Travel
+WaypointsTab:CreateSection({ name = "📌 حفظ موقع جديد بإحداثياتك الحالية" })
+
+WaypointsTab:CreateInput({
+    name = "اسم الموقع (مثال: خيمتي، محل العزب، مكان T6)",
+    placeholder = "اكتب اسم الموقع هنا...",
+    value = "",
+    callback = function(text)
+        WaypointInputName = tostring(text or ""):gsub("^%s*(.-)%s*$", "%1")
+    end
+})
+
+WaypointsTab:CreateButton({
+    name = "📍 حفظ موقعي الحالي بهذا الاسم",
+    description = "يحفظ إحداثياتك الحالية (أو موقع سيارتك) بشكل دائم.",
+    callback = function()
+        if WaypointInputName == "" then
+            Notify("اكتب اسماً أولاً", "اكتب اسم الموقع في الخانة أعلاه قبل الضغط على حفظ.", 3)
+            return
+        end
+        local MyChar = LP.Character
+        local MyRoot = MyChar and MyChar:FindFirstChild("HumanoidRootPart")
+        if not MyRoot then
+            Notify("خطأ", "شخصيتك غير موجودة حالياً.", 3)
+            return
+        end
+
+        local Pos = MyRoot.Position
+        local Existing, Idx = FindWaypointByName(WaypointInputName)
+        local NewEntry = {
+            name = WaypointInputName,
+            x = math.floor(Pos.X * 10) / 10,
+            y = math.floor(Pos.Y * 10) / 10,
+            z = math.floor(Pos.Z * 10) / 10
+        }
+
+        if Existing and Idx then
+            Settings.Waypoints[Idx] = NewEntry
+            Notify("تم تحديث الموقع", "تم تحديث إحداثيات (" .. WaypointInputName .. ") بنجاح!", 3)
+        else
+            table.insert(Settings.Waypoints, NewEntry)
+            Notify("تم حفظ الموقع", "تم حفظ موقع (" .. WaypointInputName .. ") في قائمتك بنجاح!", 3)
+        end
+
+        SelectedWaypointName = WaypointInputName
+        SaveSettings()
+        RefreshWaypointDropdown()
+    end
+})
+
+WaypointsTab:CreateSection({ name = "🚗 الانتقال السريع بالسيارة للمواقع المحفوظة" })
+
+WaypointDropdown = WaypointsTab:CreateDropdown({
+    name = "اختر الموقع المحفوظ",
+    options = GetWaypointNames(),
+    value = GetWaypointNames()[1],
+    callback = function(val)
+        local picked = type(val) == "table" and val[1] or val
+        if picked and picked ~= "لا توجد مواقع محفوظة" then
+            SelectedWaypointName = picked
+        end
+    end
+})
+
+WaypointsTab:CreateSlider({
+    name = "⚡ سرعة التنقل بالسيارة (20 إلى 200)",
+    range = { 20, 200 },
+    increment = 5,
+    value = Settings.WaypointCarSpeed,
+    callback = function(value)
+        Settings.WaypointCarSpeed = value
+        SaveSettings()
+    end
+})
+
+WaypointsTab:CreateButton({
+    name = "🚗 انطلق للموقع المحدد بالسيارة",
+    description = "اركب مقعد السائق واضغط هنا ليطير بك مباشرة للموقع المحفوظ.",
+    callback = function()
+        local TargetName = SelectedWaypointName
+        if (not TargetName or not FindWaypointByName(TargetName)) and WaypointInputName ~= "" then
+            TargetName = WaypointInputName
+        end
+        StartCarTripToWaypoint(TargetName)
+    end
+})
+
+WaypointsTab:CreateButton({
+    name = "🛑 إيقاف الرحلة الحالية فوراً",
+    description = "يوقف حركة السيارة في مكانك الحالي.",
+    callback = function()
+        IsTravelingToWaypoint = false
+        local Hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+        StopCarMomentum(GetCurrentVehicleSeat(Hum))
+        BotStatusText = "جاهز (Idle)"
+        Notify("تم الإيقاف", "تم إلغاء رحلة التنقل الحالية.", 2)
+    end
+})
+
+WaypointsTab:CreateButton({
+    name = "🗑️ حذف الموقع المحدد",
+    description = "يحذف الموقع المختار من قائمة المواقع المحفوظة.",
+    callback = function()
+        local TargetName = SelectedWaypointName
+        if (not TargetName or not FindWaypointByName(TargetName)) and WaypointInputName ~= "" then
+            TargetName = WaypointInputName
+        end
+        local _, Idx = FindWaypointByName(TargetName)
+        if Idx then
+            table.remove(Settings.Waypoints, Idx)
+            SelectedWaypointName = nil
+            SaveSettings()
+            RefreshWaypointDropdown()
+            Notify("تم الحذف", "تم حذف موقع (" .. tostring(TargetName) .. ") بنجاح.", 3)
+        else
+            Notify("تنبيه", "لم يتم العثور على موقع محدد لحذفه.", 2)
+        end
+    end
+})
+
+-- Tab 3: Smart Auto-Farm
 FarmTab:CreateSection({ name = "🚜 إعدادات الأوتو فارم الاحترافي" })
 
 FarmTab:CreateToggle({
@@ -848,7 +1395,7 @@ FarmTab:CreateSlider({
 
 FarmTab:CreateToggle({
     name = "🧰 تجهيز السلاح تلقائياً (Auto-Equip)",
-    description = "يمسك السلاح تلقائياً من الحقيبة إذا لم يكن في يدك.",
+    description = "يمسك السلاح تلقائياً من الحقيبة إذا لم يكن في يدك (حتى داخل السيارة).",
     value = Settings.FarmAutoEquip,
     callback = function(value)
         Settings.FarmAutoEquip = value
@@ -935,8 +1482,47 @@ FarmTab:CreateButton({
     end
 })
 
--- Tab 3: Deep Circle Patrol & Auto-Evade
-PatrolTab:CreateSection({ name = "🧭 إعدادات الدوران والهروب التلقائي" })
+-- Tab 4: Deep Circle Patrol, Car Flight & Abu Mashlah Farm
+PatrolTab:CreateSection({ name = "👹 أوتو فارم أبو مشلح الذكي (مواجهة من مسافة)" })
+
+PatrolTab:CreateToggle({
+    name = "⚔️ تفعيل أوتو فارم أبو مشلح فقط (دوران + قفل كاميرا)",
+    description = "يحافظ على المسافة التي تحددها بينك وبين أبو مشلح ويطلق عليه من السيارة أو مشياً.",
+    value = Settings.AutoFarmMashlah,
+    callback = function(value)
+        Settings.AutoFarmMashlah = value
+        if not value then
+            ActiveMashlahTarget = nil
+        else
+            PatrolPausedReason = nil
+            Notify("⚔️ فارم أبو مشلح", "سيتم الحفاظ على مسافة " .. tostring(Settings.MashlahKeepDist) .. "m وإطلاق النار عليه فور رسبنته!", 3)
+        end
+        SaveSettings()
+    end
+})
+
+PatrolTab:CreateSlider({
+    name = "📏 المسافة المطلوبة بينك وبين أبو مشلح (بالمتر)",
+    range = { 20, 250 },
+    increment = 5,
+    value = Settings.MashlahKeepDist,
+    callback = function(value)
+        Settings.MashlahKeepDist = value
+        SaveSettings()
+    end
+})
+
+PatrolTab:CreateToggle({
+    name = "🔫 إخراج السلاح وإطلاق النار تلقائياً على أبو مشلح",
+    description = "يخرج السلاح تلقائياً من الحقيبة ويطلق على أبو مشلح وأنت داخل السيارة.",
+    value = Settings.MashlahAutoShoot,
+    callback = function(value)
+        Settings.MashlahAutoShoot = value
+        SaveSettings()
+    end
+})
+
+PatrolTab:CreateSection({ name = "🧭 إعدادات الدوران والسيارة الطائرة" })
 
 PatrolTab:CreateButton({
     name = "📍 تحديد مركز الدائرة هنا",
@@ -977,8 +1563,30 @@ PatrolTab:CreateToggle({
 })
 
 PatrolTab:CreateToggle({
-    name = "🏃 الهروب التلقائي من أبو مشلح والوحوش (Auto-Evade)",
-    description = "يبتعد بالاتجاه المعاكس تلقائياً عند اقتراب الوحش ثم يكمل عمله.",
+    name = "🚗 طيران/انزلاق السيارة أثناء الدوران (بدون سحب سيرفر)",
+    description = "اركب مقعد السائق وسيطير البوت بالسيارة بسرعة عالية ويبقى بداخلها عند التوقف.",
+    value = Settings.CarPatrolFly,
+    callback = function(value)
+        Settings.CarPatrolFly = value
+        if not value then ClearCarFlight() end
+        SaveSettings()
+    end
+})
+
+PatrolTab:CreateSlider({
+    name = "⚡ سرعة مشي / طيران السيارة (0 إلى 200)",
+    range = { 0, 200 },
+    increment = 5,
+    value = Settings.CarPatrolSpeed,
+    callback = function(value)
+        Settings.CarPatrolSpeed = value
+        SaveSettings()
+    end
+})
+
+PatrolTab:CreateToggle({
+    name = "🏃 الهروب التلقائي من الوحوش الأخرى (Auto-Evade)",
+    description = "يبتعد عن الوحوش (لا يهرب من أبو مشلح إذا كان فارم أبو مشلح مفعّلاً).",
     value = Settings.AutoEvadeMonster,
     callback = function(value)
         Settings.AutoEvadeMonster = value
@@ -1007,8 +1615,8 @@ PatrolTab:CreateButton({
 
 PatrolTab:CreateSlider({
     name = "نصف قطر الدائرة (بالمتر)",
-    range = { 100, 1000 },
-    increment = 50,
+    range = { 100, 6000 },
+    increment = 100,
     value = Settings.PatrolRadius,
     callback = function(value)
         Settings.PatrolRadius = value
@@ -1027,14 +1635,14 @@ PatrolTab:CreateToggle({
     end
 })
 
-PatrolTab:CreateSection({ name = "🛑 شروط التوقف التلقائي" })
+PatrolTab:CreateSection({ name = "🛑 شروط التوقف التلقائي (يبقى داخل السيارة)" })
 
 PatrolTab:CreateToggle({ name = "🔴 توقف عند رصد ضب خرافي (T6)", value = Settings.StopOnT6, callback = function(v) Settings.StopOnT6 = v SaveSettings() end })
 PatrolTab:CreateToggle({ name = "🟠 توقف عند رصد ضب أسطوري (T5)", value = Settings.StopOnT5, callback = function(v) Settings.StopOnT5 = v SaveSettings() end })
-PatrolTab:CreateToggle({ name = "👹 توقف عند ظهور أبو مشلح (إذا الهروب مطفي)", value = Settings.StopOnMonster, callback = function(v) Settings.StopOnMonster = v SaveSettings() end })
+PatrolTab:CreateToggle({ name = "👹 توقف عند ظهور وحش (إذا الهروب وفارم أبو مشلح مطفي)", value = Settings.StopOnMonster, callback = function(v) Settings.StopOnMonster = v SaveSettings() end })
 PatrolTab:CreateToggle({ name = "❤️ توقف عند نقص الهيلث (دمج)", value = Settings.StopOnDamage, callback = function(v) Settings.StopOnDamage = v SaveSettings() end })
 
--- Tab 4: ESP & Showcase Visuals
+-- Tab 5: ESP & Showcase Visuals
 EspTab:CreateSection({ name = "👁️ خيارات الكشف والرادار الاحترافي" })
 
 EspTab:CreateToggle({ name = "ESP جميع الضبان (T1 إلى T6)", value = Settings.DhabAll, callback = function(v) Settings.DhabAll = v SaveSettings() end })
@@ -1049,8 +1657,8 @@ EspTab:CreateToggle({ name = "ESP حافة العالم", value = Settings.Edge,
 
 EspTab:CreateSlider({
     name = "مسافة الكشف (ESP Distance)",
-    range = { 100, 2000 },
-    increment = 50,
+    range = { 100, 6000 },
+    increment = 100,
     value = Settings.EspDistance,
     callback = function(value)
         Settings.EspDistance = value
@@ -1058,23 +1666,24 @@ EspTab:CreateSlider({
     end
 })
 
--- Tab 5: Smooth Safe Aimbot
+-- Tab 6: Smooth Safe Aimbot
 AimTab:CreateSection({ name = "🎯 إعدادات الايمبوت الآمن" })
 
 AimTab:CreateToggle({ name = "🎯 تفعيل الايمبوت الناعم (Smooth Aimbot)", value = Settings.Aimbot, callback = function(v) Settings.Aimbot = v SaveSettings() end })
+AimTab:CreateToggle({ name = "👹 استهداف أبو مشلح فقط (يتجاهل الضبان)", description = "يقفل الايمبوت على أبو مشلح فقط (يعمل وأنت تسوق السيارة أيضاً).", value = Settings.AimbotMashlahOnly, callback = function(v) Settings.AimbotMashlahOnly = v SaveSettings() end })
 AimTab:CreateToggle({ name = "👑 استهداف T5 و T6 فقط", value = Settings.AimbotRareOnly, callback = function(v) Settings.AimbotRareOnly = v SaveSettings() end })
 AimTab:CreateToggle({ name = "🖱️ التصويب عند الضغط المستمر على كلك يمين فقط", value = Settings.HoldRightClick, callback = function(v) Settings.HoldRightClick = v SaveSettings() end })
 AimTab:CreateToggle({ name = "🔫 يتطلب حمل أداة / سلاح باليد", value = Settings.RequireWeapon, callback = function(v) Settings.RequireWeapon = v SaveSettings() end })
 AimTab:CreateToggle({ name = "⭕ إظهار دائرة FOV الديناميكية", value = Settings.UseFOVCircle, callback = function(v) Settings.UseFOVCircle = v SaveSettings() end })
 
-AimTab:CreateSlider({ name = "حجم دائرة FOV", range = { 40, 350 }, increment = 10, value = Settings.FOVRadius, callback = function(v) Settings.FOVRadius = v SaveSettings() end })
-AimTab:CreateSlider({ name = "أقصى مسافة للايمبوت (بالمتر)", range = { 20, 250 }, increment = 5, value = Settings.AimbotDistance, callback = function(v) Settings.AimbotDistance = v SaveSettings() end })
+AimTab:CreateSlider({ name = "حجم دائرة FOV", range = { 40, 600 }, increment = 10, value = Settings.FOVRadius, callback = function(v) Settings.FOVRadius = v SaveSettings() end })
+AimTab:CreateSlider({ name = "أقصى مسافة للايمبوت (بالمتر)", range = { 20, 300 }, increment = 5, value = Settings.AimbotDistance, callback = function(v) Settings.AimbotDistance = v SaveSettings() end })
 AimTab:CreateSlider({ name = "نعومة التصويب (0.05 ناعم جداً - 1.0 سريع)", range = { 0.05, 1.0 }, increment = 0.05, value = Settings.AimbotSmoothness, callback = function(v) Settings.AimbotSmoothness = v SaveSettings() end })
 
 AimTab:CreateToggle({ name = "🎲 تفعيل هامش الخطأ البشري (Error Margin)", value = Settings.UseErrorMargin, callback = function(v) Settings.UseErrorMargin = v SaveSettings() end })
 AimTab:CreateSlider({ name = "نسبة دقة التصويب (%)", range = { 70, 99 }, increment = 1, value = Settings.AimAccuracy, callback = function(v) Settings.AimAccuracy = v SaveSettings() end })
 
--- Tab 6: Safe Utilities
+-- Tab 7: Safe Utilities
 UtilsTab:CreateSection({ name = "🛡️ أدوات آمنة ومساعدة" })
 
 UtilsTab:CreateToggle({
@@ -1088,11 +1697,11 @@ UtilsTab:CreateToggle({
 })
 
 UtilsTab:CreateToggle({ name = "💤 منع الطرد بسبب الخمول (Anti-AFK)", value = Settings.AntiAfkActive, callback = function(v) Settings.AntiAfkActive = v SaveSettings() end })
-UtilsTab:CreateToggle({ name = "🏎️ تحسين سرعة المركبات الخفيف", value = Settings.VehicleBoostActive, callback = function(v) Settings.VehicleBoostActive = v SaveSettings() end })
-UtilsTab:CreateSlider({ name = "السرعة القصوى للمركبة", range = { 50, 180 }, increment = 5, value = Settings.VehicleMaxSpeed, callback = function(v) Settings.VehicleMaxSpeed = v SaveSettings() end })
+UtilsTab:CreateToggle({ name = "🏎️ تحسين سرعة المركبات الأرضية", value = Settings.VehicleBoostActive, callback = function(v) Settings.VehicleBoostActive = v SaveSettings() end })
+UtilsTab:CreateSlider({ name = "السرعة القصوى للمركبة الأرضية", range = { 50, 200 }, increment = 5, value = Settings.VehicleMaxSpeed, callback = function(v) Settings.VehicleMaxSpeed = v SaveSettings() end })
 
 ---------------------------------------------------------
--- Core Logic: Target Priority, Blacklist & Visual Builders
+-- Core Logic: Target Priority, Mashlah Finder & Visual Builders
 ---------------------------------------------------------
 local TierPriority = { T6 = 6, T5 = 5, T4 = 4, T3 = 3, T2 = 2, T1 = 1 }
 
@@ -1106,10 +1715,29 @@ local function IsTierSelectedForFarm(Tier)
     return false
 end
 
-local function FindNearestMonster(MyPos, MaxDist)
+local function FindAbuMashlah(MyPos)
+    local ClosestModel, ClosestPart, ClosestDist = nil, nil, math.huge
+    for Model, Cat in pairs(TrackedEntities) do
+        if Cat == "Monster" and Model.Parent and IsMashlahModel(Model) and IsMonsterAlive(Model) then
+            local Part = GetPart(Model)
+            if Part then
+                local Dist = (Part.Position - MyPos).Magnitude
+                if Dist < ClosestDist then
+                    ClosestDist = Dist
+                    ClosestModel = Model
+                    ClosestPart = Part
+                end
+            end
+        end
+    end
+    return ClosestModel, ClosestPart, ClosestDist
+end
+
+local function FindNearestMonster(MyPos, MaxDist, IgnoreMashlah)
     local ClosestModel, ClosestPart, ClosestDist = nil, nil, MaxDist
     for Model, Cat in pairs(TrackedEntities) do
-        if Cat == "Monster" and Model.Parent then
+        if Cat == "Monster" and Model.Parent and IsMonsterAlive(Model) then
+            if IgnoreMashlah and IsMashlahModel(Model) then continue end
             local Part = GetPart(Model)
             if Part then
                 local Dist = (Part.Position - MyPos).Magnitude
@@ -1210,7 +1838,7 @@ local function UpdateCham(Model, Enabled, Color)
 end
 
 ---------------------------------------------------------
--- Main Loops (Auto-Farm, Auto-Evade, Patrol, ESP, Aimbot)
+-- Main Loops (Abu Mashlah Kite Farm, Auto-Farm, Patrol, ESP, Aimbot)
 ---------------------------------------------------------
 LP.Idled:Connect(function()
     if Settings.AntiAfkActive and overlayGui.Parent then
@@ -1233,6 +1861,7 @@ task.spawn(function()
                 BotStatusText = "متوقف: تعرضت لدمج ❤️"
                 ClearGlide()
                 Notify("🛑 توقف الدوران التلقائي", "تم إيقاف الدوران بسبب تعرضك لضرر!", 4)
+                SendDiscordWebhook("🛑 توقف الدوران التلقائي", "توقف البوت بسبب تعرض الشخصية لضرر (دمج).", 15548997)
             end
             LastHealth = Hum.Health
         else
@@ -1247,10 +1876,14 @@ local TargetStartDist = 0
 
 task.spawn(function()
     while overlayGui.Parent do
-        task.wait(0.12)
-        if IsEatingAtTent then continue end
+        task.wait(0.10)
+        if IsEatingAtTent or IsTravelingToWaypoint then
+            ActiveMashlahTarget = nil
+            continue
+        end
 
-        if Settings.AutoTentActive and (Settings.AutoFarmActive or Settings.PatrolActive) and (tick() - LastTentTimestamp) >= (Settings.TentIntervalMinutes * 60) then
+        if Settings.AutoTentActive and (Settings.AutoFarmActive or Settings.PatrolActive or Settings.AutoFarmMashlah) and (tick() - LastTentTimestamp) >= (Settings.TentIntervalMinutes * 60) then
+            ActiveMashlahTarget = nil
             ExecuteTentEatRoutine()
             continue
         end
@@ -1259,35 +1892,94 @@ task.spawn(function()
         local MyRoot = MyChar and MyChar:FindFirstChild("HumanoidRootPart")
         local Hum = MyChar and MyChar:FindFirstChildOfClass("Humanoid")
         if not MyRoot or not Hum or Hum.Health <= 0 then
+            ActiveMashlahTarget = nil
             ClearGlide()
             continue
         end
 
-        -- 1. Auto-Evade Monsters
+        local Seat = GetCurrentVehicleSeat(Hum)
+
+        -- 0. Dedicated Abu Mashlah Kite Farm (Priority over Patrol & Evade)
+        if Settings.AutoFarmMashlah then
+            local MashlahModel, MashlahPart, MashlahDist = FindAbuMashlah(MyRoot.Position)
+            if MashlahModel and MashlahPart then
+                ActiveMashlahTarget = MashlahPart
+                BotStatusText = string.format("⚔️ فارم أبو مشلح • %dm (الهدف %dm)", math.floor(MashlahDist), Settings.MashlahKeepDist)
+
+                -- إخراج السلاح تلقائياً حتى وأنت داخل السيارة
+                if Settings.FarmAutoEquip then
+                    EnsureToolEquipped(MyChar, Hum)
+                end
+
+                local KeepDist = Settings.MashlahKeepDist
+                local DiffFromMashlah = Vector3.new(MyRoot.Position.X - MashlahPart.Position.X, 0, MyRoot.Position.Z - MashlahPart.Position.Z)
+                if DiffFromMashlah.Magnitude < 0.5 then
+                    DiffFromMashlah = Vector3.new(1, 0, 0)
+                end
+
+                local TargetGoal
+                if MashlahDist < (KeepDist - 8) then
+                    -- إذا اقترب منك أبو مشلح: ابتعد مباشرة للخلف حتى المسافة المطلوبة
+                    TargetGoal = MashlahPart.Position + DiffFromMashlah.Unit * (KeepDist + 10)
+                elseif MashlahDist > (KeepDist + 15) then
+                    -- إذا ابتعد: اقترب منه حتى المسافة المطلوبة فقط
+                    TargetGoal = MashlahPart.Position + DiffFromMashlah.Unit * KeepDist
+                else
+                    -- حافظ على نفس المسافة مع دوران دائري ناعم حوله
+                    MashlahOrbitAngle = MashlahOrbitAngle + 0.14
+                    local BaseAngle = math.atan2(DiffFromMashlah.Z, DiffFromMashlah.X)
+                    local NextAngle = BaseAngle + 0.35
+                    TargetGoal = Vector3.new(
+                        MashlahPart.Position.X + math.cos(NextAngle) * KeepDist,
+                        MashlahPart.Position.Y,
+                        MashlahPart.Position.Z + math.sin(NextAngle) * KeepDist
+                    )
+                end
+
+                if Seat then
+                    local KiteSpeed = math.max(Settings.CarPatrolSpeed, 95)
+                    MoveCarTowardsTarget(Seat, TargetGoal, KiteSpeed)
+                else
+                    MoveTowardsTarget(MyChar, MyRoot, Hum, Vector3.new(TargetGoal.X, MyRoot.Position.Y, TargetGoal.Z), (Settings.FarmMode == "GentleGlide"))
+                end
+                continue
+            else
+                ActiveMashlahTarget = nil
+            end
+        else
+            ActiveMashlahTarget = nil
+        end
+
+        -- 1. Auto-Evade Other Monsters
         if Settings.AutoEvadeMonster and (Settings.AutoFarmActive or Settings.PatrolActive) then
-            local MonsterModel, MonsterPart, MonsterDist = FindNearestMonster(MyRoot.Position, Settings.EvadeTriggerDist)
+            local MonsterModel, MonsterPart, MonsterDist = FindNearestMonster(MyRoot.Position, Settings.EvadeTriggerDist, Settings.AutoFarmMashlah)
             if MonsterModel and MonsterPart then
                 BotStatusText = "هروب من وحش (" .. math.floor(MonsterDist) .. "m) 🏃"
                 local AwayDir = (MyRoot.Position - MonsterPart.Position)
                 local FlatDir = Vector3.new(AwayDir.X, 0, AwayDir.Z)
                 if FlatDir.Magnitude < 0.1 then FlatDir = Vector3.new(1, 0, 0) end
-                local SafeGoal = MyRoot.Position + FlatDir.Unit * 55
-                MoveTowardsTarget(MyChar, MyRoot, Hum, SafeGoal, (Settings.FarmMode == "GentleGlide"))
+                local SafeGoal = MyRoot.Position + FlatDir.Unit * 65
+                if Seat and Settings.CarPatrolFly then
+                    MoveCarTowardsTarget(Seat, SafeGoal, math.max(Settings.CarPatrolSpeed, 110))
+                else
+                    MoveTowardsTarget(MyChar, MyRoot, Hum, SafeGoal, (Settings.FarmMode == "GentleGlide"))
+                end
                 continue
             end
         end
 
-        -- 2. Patrol Auto-Stop Checks
+        -- 2. Patrol Auto-Stop Checks (يبقى داخل السيارة ولا ينزل)
         if Settings.PatrolActive and not PatrolPausedReason then
             for Model, Cat in pairs(TrackedEntities) do
                 if Model.Parent then
                     local Part = GetPart(Model)
                     if Part and (Part.Position - MyRoot.Position).Magnitude <= Settings.PatrolRadius then
-                        if Cat == "Monster" and Settings.StopOnMonster and not Settings.AutoEvadeMonster then
+                        if Cat == "Monster" and Settings.StopOnMonster and not Settings.AutoEvadeMonster and not (Settings.AutoFarmMashlah and IsMashlahModel(Model)) then
                             PatrolPausedReason = "رصد وحش (" .. Model.Name .. ")"
                             BotStatusText = "متوقف: رصد وحش 👹"
-                            ClearGlide()
-                            Notify("🛑 توقف الدوران", "تم رصد أبو مشلح أو وحش قريب!", 4)
+                            StopCarMomentum(Seat)
+                            Notify("🛑 توقف الدوران", "تم رصد وحش قريب!", 4)
+                            SendDiscordWebhook("👹 رصد وحش قريب", "توقف الدوران بسبب رصد وحش: **" .. Model.Name .. "**", 15548997)
                             break
                         elseif Cat == "Dhab" then
                             local _, _, Tier, Alive = GetDhabInfo(Model)
@@ -1295,14 +1987,16 @@ task.spawn(function()
                                 if Tier == "T6" and Settings.StopOnT6 then
                                     PatrolPausedReason = "رصد ضب خرافي T6!"
                                     BotStatusText = "متوقف: ضب خرافي T6 👑"
-                                    ClearGlide()
+                                    StopCarMomentum(Seat)
                                     Notify("👑 توقف الدوران", "تم العثور على ضب خرافي (T6)!", 5)
+                                    SendDiscordWebhook("👑 تم رصد ضب خرافي (T6)!", "توقف البوت في مكانه عند رصد ضب خرافي قريب!", 16723275)
                                     break
                                 elseif Tier == "T5" and Settings.StopOnT5 then
                                     PatrolPausedReason = "رصد ضب أسطوري T5!"
                                     BotStatusText = "متوقف: ضب أسطوري T5 🟠"
-                                    ClearGlide()
+                                    StopCarMomentum(Seat)
                                     Notify("🟠 توقف الدوران", "تم العثور على ضب أسطوري (T5)!", 5)
+                                    SendDiscordWebhook("🟠 تم رصد ضب أسطوري (T5)!", "توقف البوت في مكانه عند رصد ضب أسطوري قريب!", 16759085)
                                     break
                                 end
                             end
@@ -1393,23 +2087,33 @@ task.spawn(function()
             end
         end
 
-        -- 4. Execute Deep Circle Patrol
+        -- 4. Execute Deep Circle Patrol (Car Flight or Walking)
         if Settings.PatrolActive and PatrolCenter then
-            BotStatusText = "دوران استكشافي (حلقة " .. tostring(PatrolRingIndex) .. "/3) 🧭"
             local Scales = {1.0, 0.60, 0.30}
             local CurrentRadius = Settings.PatrolRadius * Scales[PatrolRingIndex]
             local GoalX = PatrolCenter.X + math.cos(PatrolAngle) * CurrentRadius
             local GoalZ = PatrolCenter.Z + math.sin(PatrolAngle) * CurrentRadius
-            local GoalPos = Vector3.new(GoalX, MyRoot.Position.Y, GoalZ)
+            local GoalPos = Vector3.new(GoalX, PatrolCenter.Y, GoalZ)
 
-            if (GoalPos - MyRoot.Position).Magnitude <= 12 then
+            local UseCarNow = (Seat ~= nil and Settings.CarPatrolFly)
+            local ReachDist = UseCarNow and 35 or 12
+
+            BotStatusText = (UseCarNow and "طيران سيارة" or "دوران مشي") .. " (حلقة " .. tostring(PatrolRingIndex) .. "/3) 🧭"
+
+            if (Vector3.new(GoalPos.X, MyRoot.Position.Y, GoalPos.Z) - MyRoot.Position).Magnitude <= ReachDist then
                 PatrolAngle = PatrolAngle + 0.45
                 if PatrolAngle >= math.pi * 2 then
                     PatrolAngle = 0
                     PatrolRingIndex = (PatrolRingIndex % 3) + 1
                 end
             else
-                MoveTowardsTarget(MyChar, MyRoot, Hum, GoalPos, (Settings.FarmMode == "GentleGlide"))
+                if UseCarNow then
+                    local RingSpeedFactor = (PatrolRingIndex == 3) and 0.65 or 1.0
+                    MoveCarTowardsTarget(Seat, GoalPos, Settings.CarPatrolSpeed * RingSpeedFactor)
+                else
+                    ClearCarFlight()
+                    MoveTowardsTarget(MyChar, MyRoot, Hum, Vector3.new(GoalX, MyRoot.Position.Y, GoalZ), (Settings.FarmMode == "GentleGlide"))
+                end
             end
         else
             ClearGlide()
@@ -1421,7 +2125,7 @@ task.spawn(function()
     ClearGlide()
 end)
 
--- ESP, Chams & Dashboard HUD Update Loop
+-- ESP, Chams, Discord Rare Alerts & Dashboard HUD Update Loop
 task.spawn(function()
     while overlayGui.Parent do
         task.wait(0.3)
@@ -1450,10 +2154,18 @@ task.spawn(function()
                     local IsRare = (Tier == "T5" or Tier == "T6")
                     if IsRare and Alive then
                         table.insert(RareListText, string.format("• %s (%s) — %dm", RarityStr, Tier, Dist))
-                        if Settings.SmartAlerts and not NotifiedRareDhabs[Model] then
+                        if not NotifiedRareDhabs[Model] then
                             NotifiedRareDhabs[Model] = true
-                            pcall(function() NotifySound:Play() end)
-                            Notify("👑 رصد ضب نادر!", string.format("ظهر ضب %s (%s) على بعد %d متر!", RarityStr, Tier, Dist), 4)
+                            if Settings.SmartAlerts then
+                                pcall(function() NotifySound:Play() end)
+                                Notify("👑 رصد ضب نادر!", string.format("ظهر ضب %s (%s) على بعد %d متر!", RarityStr, Tier, Dist), 4)
+                            end
+                            local EmbedColor = (Tier == "T6") and 16723275 or 16759085
+                            SendDiscordWebhook(
+                                string.format("👑 رصد ضب %s (%s)!", RarityStr, Tier),
+                                string.format("تم رصد ضب **%s (%s)** على بُعد **%d متر** من موقعك.", RarityStr, Tier, Dist),
+                                EmbedColor
+                            )
                         end
                     end
 
@@ -1516,7 +2228,7 @@ task.spawn(function()
     end
 end)
 
--- Smooth Aimbot, Dynamic FOV, 2D Rare Tracers & Vehicle Boost (Camera Priority Fix)
+-- Smooth Aimbot (Supports Abu Mashlah Only & Auto-Farm Lock), FOV, Tracers & Boost
 local RenderStepName = "kizithebusy_ProRender"
 pcall(function() RunService:UnbindFromRenderStep(RenderStepName) end)
 
@@ -1579,7 +2291,23 @@ RunService:BindToRenderStep(RenderStepName, Enum.RenderPriority.Camera.Value + 1
         end
     end
 
-    -- Dynamic FOV Circle & Smooth Aimbot
+    -- Priority 1: Dedicated Abu Mashlah Kite Farm Camera Lock & Auto-Fire
+    if Settings.AutoFarmMashlah and ActiveMashlahTarget and ActiveMashlahTarget.Parent and MyRoot and Hum then
+        local DesiredCFrame = CFrame.new(Camera.CFrame.Position, ActiveMashlahTarget.Position)
+        Camera.CFrame = Camera.CFrame:Lerp(DesiredCFrame, math.max(Settings.AimbotSmoothness, 0.35))
+        if Settings.MashlahAutoShoot then
+            FireWeapon(MyChar, Hum)
+        end
+        if FOVCircle then
+            FOVCircle.Position = CenterScreen
+            FOVCircle.Radius = Settings.FOVRadius
+            FOVCircle.Color = DarkTheme.Locked
+            FOVCircle.Visible = Settings.UseFOVCircle
+        end
+        return
+    end
+
+    -- Priority 2: Standard Smooth Aimbot (Dhab or Abu Mashlah Only)
     local AimbotActiveNow = Settings.Aimbot and MyRoot
     if AimbotActiveNow and Settings.HoldRightClick then
         AimbotActiveNow = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
@@ -1592,9 +2320,16 @@ RunService:BindToRenderStep(RenderStepName, Enum.RenderPriority.Camera.Value + 1
     if AimbotActiveNow then
         local ClosestScreenDist = Settings.UseFOVCircle and Settings.FOVRadius or math.huge
         for Model, Cat in pairs(TrackedEntities) do
-            if Cat == "Dhab" and Model.Parent then
-                local _, _, Tier, Alive = GetDhabInfo(Model)
-                if Alive and (not Settings.AimbotRareOnly or Tier == "T5" or Tier == "T6") then
+            if Model.Parent then
+                local ValidTarget = false
+                if Settings.AimbotMashlahOnly then
+                    ValidTarget = (Cat == "Monster" and IsMashlahModel(Model) and IsMonsterAlive(Model))
+                elseif Cat == "Dhab" then
+                    local _, _, Tier, Alive = GetDhabInfo(Model)
+                    ValidTarget = (Alive and (not Settings.AimbotRareOnly or Tier == "T5" or Tier == "T6"))
+                end
+
+                if ValidTarget then
                     local Part = GetPart(Model)
                     if Part and (Part.Position - MyRoot.Position).Magnitude <= Settings.AimbotDistance then
                         local ScreenPos, OnScreen = Camera:WorldToViewportPoint(Part.Position)
@@ -1637,4 +2372,4 @@ RunService:BindToRenderStep(RenderStepName, Enum.RenderPriority.Camera.Value + 1
     end
 end)
 
-Notify(CONFIG.HubName, "تم تحميل النسخة الاحترافية الكاملة (V4) بنجاح!", 4)
+Notify(CONFIG.HubName, "تم تحميل النسخة الاحترافية (V7) بنجاح!", 4)
