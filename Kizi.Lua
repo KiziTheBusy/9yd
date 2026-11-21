@@ -402,7 +402,53 @@ local function CleanupEntityVisuals(Obj)
         TracerCache[Obj] = nil
     end
 end
+local function IsDhabMountedOrCarried(Model)
+    if not Model or not Model.Parent then return false end
 
+    local curr = Model.Parent
+    while curr and curr ~= Workspace do
+        local nLow = curr.Name:lower()
+        if Players:GetPlayerFromCharacter(curr) then return true end
+        if curr:FindFirstChildOfClass("VehicleSeat") or TrackedEntities[curr] == "Vehicle" then
+            return true
+        end
+        if nLow:find("rack") or nLow:find("roof") or nLow:find("cargo") or nLow:find("cage") or nLow:find("trunk") or nLow:find("carry") or nLow:find("slot") or nLow:find("mount") then
+            return true
+        end
+        curr = curr.Parent
+    end
+
+    for Key, Value in pairs(Model:GetAttributes()) do
+        local kLow = tostring(Key):lower()
+        local vLow = tostring(Value):lower()
+        if kLow:find("mount") or kLow:find("carr") or kLow:find("load") or kLow:find("stor") or kLow:find("attach") or kLow:find("roof") or kLow:find("owner") or kLow:find("holder") then
+            if Value == true or (type(Value) == "string" and Value ~= "" and vLow ~= "none" and vLow ~= "false") then
+                return true
+            end
+        end
+        if kLow == "state" and (vLow:find("carr") or vLow:find("mount") or vLow:find("load") or vLow:find("stor") or vLow:find("rack")) then
+            return true
+        end
+    end
+
+    local Part = Model.PrimaryPart or Model:FindFirstChild("HumanoidRootPart") or Model:FindFirstChildWhichIsA("BasePart")
+    if Part then
+        local ok, connected = pcall(function() return Part:GetConnectedParts(true) end)
+        if ok and type(connected) == "table" then
+            for _, cPart in ipairs(connected) do
+                if cPart:IsA("VehicleSeat") then return true end
+                local cModel = cPart:FindFirstAncestorOfClass("Model")
+                if cModel and cModel ~= Model then
+                    if TrackedEntities[cModel] == "Vehicle" or Players:GetPlayerFromCharacter(cModel) or cModel:FindFirstChildOfClass("VehicleSeat") then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+
+    return false
+end
 local function IsDhabAlive(Model)
     if not Model or not Model.Parent then return false end
 
@@ -448,6 +494,10 @@ local function IsMonsterAlive(Model)
 end
 
 local function GetDhabInfo(Model)
+    if IsDhabMountedOrCarried(Model) then
+        CleanupEntityVisuals(Model)
+        return nil
+    end
     local TierFound, StateFound = nil, nil
     for Key, Value in pairs(Model:GetAttributes()) do
         local KeyLower = tostring(Key):lower()
