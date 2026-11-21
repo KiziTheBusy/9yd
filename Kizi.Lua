@@ -771,6 +771,8 @@ local function StopCarMomentum(Seat)
         MainPart.AssemblyAngularVelocity = Vector3.zero
     end)
 end
+local CarRayParams = RaycastParams.new()
+CarRayParams.FilterType = Enum.RaycastFilterType.Exclude
 
 local function MoveCarTowardsTarget(Seat, TargetPos, Speed)
     local CarModel = Seat:FindFirstAncestorOfClass("Model")
@@ -779,30 +781,48 @@ local function MoveCarTowardsTarget(Seat, TargetPos, Speed)
     if not CarBodyVel or CarBodyVel.Parent ~= MainPart then
         ClearCarFlight()
         CarBodyVel = Instance.new("BodyVelocity")
-        CarBodyVel.MaxForce = Vector3.new(9e6, 9e6, 9e6)
+        -- قوة على X و Z فقط، والارتفاع Y = 0 عشان الجاذبية تثبّت الكفرات بالأرض
+        CarBodyVel.MaxForce = Vector3.new(9e6, 0, 9e6)
         CarBodyVel.Parent = MainPart
 
         CarBodyGyro = Instance.new("BodyGyro")
-        CarBodyGyro.MaxTorque = Vector3.new(9e6, 9e6, 9e6)
-        CarBodyGyro.P = 12000
+        CarBodyGyro.MaxTorque = Vector3.new(4e5, 9e6, 4e5)
+        CarBodyGyro.P = 8000
         CarBodyGyro.Parent = MainPart
     end
 
     if Speed <= 0 then
+        CarBodyVel.MaxForce = Vector3.new(9e6, 0, 9e6)
         CarBodyVel.Velocity = Vector3.zero
         return
     end
 
-    local HoverGoal = Vector3.new(TargetPos.X, TargetPos.Y + 4.5, TargetPos.Z)
-    local Diff = HoverGoal - MainPart.Position
-    if Diff.Magnitude > 1 then
-        CarBodyVel.Velocity = Diff.Unit * Speed
-        local FlatLook = Vector3.new(TargetPos.X, MainPart.Position.Y, TargetPos.Z)
-        if (FlatLook - MainPart.Position).Magnitude > 0.5 then
-            CarBodyGyro.CFrame = CFrame.new(MainPart.Position, FlatLook)
-        end
-    else
+    local FlatTarget = Vector3.new(TargetPos.X, MainPart.Position.Y, TargetPos.Z)
+    local Diff = FlatTarget - MainPart.Position
+    if Diff.Magnitude <= 1 then
+        CarBodyVel.MaxForce = Vector3.new(9e6, 0, 9e6)
         CarBodyVel.Velocity = Vector3.zero
+        return
+    end
+
+    local MoveDir = Diff.Unit
+    CarBodyGyro.CFrame = CFrame.new(MainPart.Position, FlatTarget)
+
+    -- فحص الأرض والعوائق لتجاوز الصخور بدون البقاء في الهواء
+    CarRayParams.FilterDescendantsInstances = {CarModel or Seat, LP.Character}
+    local DownHit = Workspace:Raycast(MainPart.Position, Vector3.new(0, -10, 0), CarRayParams)
+    local FrontHit = Workspace:Raycast(MainPart.Position + Vector3.new(0, 1, 0), MoveDir * 14, CarRayParams)
+
+    local IsGrounded = (DownHit ~= nil and (MainPart.Position.Y - DownHit.Position.Y) <= 6.5)
+
+    if FrontHit and FrontHit.Instance and FrontHit.Instance.CanCollide and IsGrounded then
+        -- دفعة خفيفة ولحظية لتسلق الصخرة أو الطعس فقط
+        CarBodyVel.MaxForce = Vector3.new(9e6, 6e5, 9e6)
+        CarBodyVel.Velocity = Vector3.new(MoveDir.X * Speed, 22, MoveDir.Z * Speed)
+    else
+        -- إرجاع Y = 0 فوراً حتى تنزل الكفرات للأرض ولا تنقفط
+        CarBodyVel.MaxForce = Vector3.new(9e6, 0, 9e6)
+        CarBodyVel.Velocity = Vector3.new(MoveDir.X * Speed, 0, MoveDir.Z * Speed)
     end
 end
 
