@@ -674,12 +674,31 @@ local function DrawPatrolRings()
         end
     end
 end
-
 ---------------------------------------------------------
 -- Rayfield Gen2 Window & Auto-Cleanup
 ---------------------------------------------------------
 if type(getgenv) == "function" and type(getgenv().KiziHubCleanup) == "function" then
     pcall(getgenv().KiziHubCleanup)
+end
+
+local function GetAllGuiContainers()
+    local list = {}
+    if type(gethui) == "function" then
+        local ok, h = pcall(gethui)
+        if ok and h then table.insert(list, h) end
+    end
+    local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+    if ok and cg then table.insert(list, cg) end
+    local pg = LP:FindFirstChildOfClass("PlayerGui")
+    if pg then table.insert(list, pg) end
+    return list
+end
+
+local BeforeGuis = {}
+for _, container in ipairs(GetAllGuiContainers()) do
+    for _, child in ipairs(container:GetChildren()) do
+        BeforeGuis[child] = true
+    end
 end
 
 local window = Rayfield:CreateWindow({
@@ -688,17 +707,28 @@ local window = Rayfield:CreateWindow({
     sidebarLayout = true,
 })
 
+local CapturedRayfieldGuis = {}
+for _, container in ipairs(GetAllGuiContainers()) do
+    for _, child in ipairs(container:GetChildren()) do
+        if not BeforeGuis[child] and child ~= overlayGui then
+            table.insert(CapturedRayfieldGuis, child)
+        end
+    end
+end
+
 if type(getgenv) == "function" then
     getgenv().KiziHubCleanup = function()
         pcall(ClearRingVisuals)
         pcall(function()
             if overlayGui and overlayGui.Parent then overlayGui:Destroy() end
         end)
+        for _, guiObj in ipairs(CapturedRayfieldGuis) do
+            pcall(function()
+                if guiObj and guiObj.Parent then guiObj:Destroy() end
+            end)
+        end
         pcall(function()
             if Rayfield and type(Rayfield.Destroy) == "function" then Rayfield:Destroy() end
-        end)
-        pcall(function()
-            if window and type(window.Destroy) == "function" then window:Destroy() end
         end)
     end
 end
