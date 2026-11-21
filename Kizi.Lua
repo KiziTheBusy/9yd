@@ -645,7 +645,22 @@ local window = Rayfield:CreateWindow({
     subtitle = CONFIG.Subtitle,
     sidebarLayout = true,
 })
+-- إغلاق النسخة القديمة تلقائياً عند التحديث لمنع تكرار القوائم
+if type(getgenv) == "function" and type(getgenv().KiziHubCleanup) == "function" then
+    pcall(getgenv().KiziHubCleanup)
+end
 
+if type(getgenv) == "function" then
+    getgenv().KiziHubCleanup = function()
+        pcall(ClearRingVisuals)
+        pcall(function()
+            if overlayGui and overlayGui.Parent then overlayGui:Destroy() end
+        end)
+        pcall(function()
+            if window and type(window.Destroy) == "function" then window:Destroy() end
+        end)
+    end
+end
 local function Notify(titleText, contentText, dur)
     pcall(function()
         window:Notify({
